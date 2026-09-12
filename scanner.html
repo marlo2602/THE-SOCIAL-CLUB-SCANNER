@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HE SOCIAL CLUB — Scanner QR</title>
+
+  <!-- Lector QR externo: se ejecuta fuera de Google Apps Script para permitir cámara -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <style>
+    :root{
+      --green:#b7ff00;
+      --bg:#050505;
+      --panel:#0c0c0c;
+      --text:#fff;
+      --muted:#999;
+      --red:#ff5555;
+    }
+
+    *{box-sizing:border-box}
+
+    body{
+      margin:0;
+      min-height:100vh;
+      background:
+        radial-gradient(circle at top, #132000 0%, #050505 38%, #000 100%);
+      color:var(--text);
+      font-family:Arial,Helvetica,sans-serif;
+      padding:18px 14px;
+    }
+
+    .wrap{
+      width:min(100%,520px);
+      margin:0 auto;
+    }
+
+    .brand{
+      text-align:center;
+      font-size:30px;
+      font-weight:900;
+      letter-spacing:5px;
+      color:var(--green);
+      text-shadow:
+        0 0 8px rgba(183,255,0,.7),
+        0 0 25px rgba(183,255,0,.3);
+      margin:12px 0 5px;
+    }
+
+    .subtitle{
+      text-align:center;
+      color:#aaa;
+      font-size:12px;
+      letter-spacing:2px;
+      margin-bottom:18px;
+    }
+
+    .card{
+      background:rgba(12,12,12,.96);
+      border:1px solid #242424;
+      border-radius:18px;
+      padding:18px;
+      box-shadow:0 12px 40px rgba(0,0,0,.4);
+    }
+
+    #reader{
+      width:100%;
+      overflow:hidden;
+      border-radius:14px;
+      background:#000;
+      border:1px solid rgba(183,255,0,.25);
+    }
+
+    #reader video{
+      border-radius:12px;
+    }
+
+    .message{
+      margin-top:14px;
+      padding:14px;
+      border-radius:12px;
+      background:#090909;
+      border:1px solid #292929;
+      text-align:center;
+      color:#ccc;
+      font-size:14px;
+      line-height:1.45;
+    }
+
+    .message.ok{
+      border-color:var(--green);
+      color:var(--green);
+    }
+
+    .message.error{
+      border-color:var(--red);
+      color:#ff8888;
+    }
+
+    button{
+      width:100%;
+      margin-top:12px;
+      padding:14px;
+      border-radius:11px;
+      border:1px solid var(--green);
+      background:rgba(183,255,0,.10);
+      color:var(--green);
+      font-weight:900;
+      font-size:14px;
+      cursor:pointer;
+    }
+
+    button:hover{
+      background:rgba(183,255,0,.18);
+    }
+
+    .small{
+      margin-top:12px;
+      text-align:center;
+      color:#666;
+      font-size:11px;
+      line-height:1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <div class="brand">HE SOCIAL CLUB</div>
+    <div class="subtitle">SCANNER QR · CONTROL DE ACCESO</div>
+
+    <div class="card">
+
+      <div id="reader"></div>
+
+      <div id="message" class="message">
+        Pulsa <strong>INICIAR CÁMARA</strong> y permite el acceso a la cámara.
+      </div>
+
+      <button id="startButton" type="button">
+        INICIAR CÁMARA
+      </button>
+
+      <button id="stopButton" type="button" style="display:none;">
+        DETENER CÁMARA
+      </button>
+
+      <div class="small">
+        El QR debe contener un código como NOC-0001.
+        Al leerlo, el código regresará automáticamente al sistema de control de acceso.
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const message = document.getElementById('message');
+    const startButton = document.getElementById('startButton');
+    const stopButton = document.getElementById('stopButton');
+
+    const params = new URLSearchParams(window.location.search);
+    const returnOrigin = params.get('returnOrigin');
+
+    let scanner = null;
+    let scanning = false;
+    let sent = false;
+
+    function showMessage(text, type) {
+      message.className = 'message' + (type ? ' ' + type : '');
+      message.innerHTML = text;
+    }
+
+    async function startCamera() {
+
+      if (scanning) return;
+
+      if (!window.isSecureContext) {
+        showMessage(
+          'La cámara requiere una conexión segura <strong>HTTPS</strong>.',
+          'error'
+        );
+        return;
+      }
+
+      showMessage(
+        'Solicitando permiso para utilizar la cámara...'
+      );
+
+      try {
+
+        scanner = new Html5Qrcode('reader');
+
+        await scanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: function(viewfinderWidth, viewfinderHeight) {
+              const size =
+                Math.floor(
+                  Math.min(viewfinderWidth, viewfinderHeight) * 0.72
+                );
+
+              return {
+                width: size,
+                height: size
+              };
+            },
+            aspectRatio: 1.0
+          },
+
+          function(decodedText) {
+            handleCode(decodedText);
+          },
+
+          function() {
+            // Errores normales mientras la cámara busca un QR: ignorar.
+          }
+        );
+
+        scanning = true;
+        startButton.style.display = 'none';
+        stopButton.style.display = 'block';
+
+        showMessage(
+          '📷 Cámara activa.<br>Apunta al QR de la entrada.'
+        );
+
+      } catch (error) {
+
+        console.error(error);
+
+        showMessage(
+          'No se pudo abrir la cámara.<br><br>' +
+          'Verifica que estés usando HTTPS y que hayas permitido el acceso a la cámara.',
+          'error'
+        );
+
+      }
+    }
+
+    async function stopCamera() {
+
+      if (!scanner || !scanning) return;
+
+      try {
+        await scanner.stop();
+      } catch (error) {
+        console.error(error);
+      }
+
+      scanning = false;
+      startButton.style.display = 'block';
+      stopButton.style.display = 'none';
+
+      showMessage('Cámara detenida.');
+    }
+
+    async function handleCode(decodedText) {
+
+      if (sent) return;
+
+      const text = String(decodedText || '')
+        .trim()
+        .toUpperCase();
+
+      const match = text.match(/^NOC-\d{4,}$/);
+
+      if (!match) {
+        showMessage(
+          'Se detectó un QR, pero no contiene un código válido de HE SOCIAL CLUB.',
+          'error'
+        );
+        return;
+      }
+
+      sent = true;
+
+      try {
+        await scanner.stop();
+      } catch (error) {}
+
+      scanning = false;
+
+      startButton.style.display = 'block';
+      stopButton.style.display = 'none';
+
+      showMessage(
+        '✓ QR LEÍDO<br><strong style="font-size:22px;">' +
+        match[0] +
+        '</strong><br><br>Regresando al control de acceso...',
+        'ok'
+      );
+
+      if (
+        window.opener &&
+        returnOrigin &&
+        window.location.origin !== returnOrigin
+      ) {
+
+        window.opener.postMessage(
+          {
+            type: 'HE_SOCIAL_CLUB_QR',
+            code: match[0]
+          },
+          returnOrigin
+        );
+
+        setTimeout(function() {
+          window.close();
+        }, 700);
+
+        return;
+      }
+
+      showMessage(
+        '✓ QR LEÍDO<br><strong style="font-size:22px;">' +
+        match[0] +
+        '</strong><br><br>' +
+        'No se encontró la ventana del sistema que abrió este scanner.',
+        'ok'
+      );
+    }
+
+    startButton.addEventListener('click', startCamera);
+    stopButton.addEventListener('click', stopCamera);
+  </script>
+</body>
+</html>
